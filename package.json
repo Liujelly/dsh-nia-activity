@@ -1,1 +1,41 @@
-{"name":"dsh-nia-activity","version":"0.1.0","description":"角色自主活动：不定时唤醒、记忆情绪与 QQ 联动","type":"module","license":"MIT","main":"lib/index.js","exports":{".":"./lib/index.js","./client":"./client.js","./package.json":"./package.json","./cordis.patch.yml":"./cordis.patch.yml"},"files":["lib","client.js","cordis.patch.yml","README.md"],"engines":{"node":">=22"},"dsh":{"bundle":{"patch":"./cordis.patch.yml"},"client":{"platform":"web","inject":["slots"],"external":["react"]}},"scripts":{"test":"node --test --test-isolation=none test/*.test.mjs"}}
+{
+  "name": "dsh-nia-activity",
+  "version": "0.2.0",
+  "description": "角色自主活动：不定时唤醒、记忆情绪与 QQ 联动",
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "slots"
+      ],
+      "external": [
+        "react"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test --test-isolation=none test/*.test.mjs"
+  }
+}

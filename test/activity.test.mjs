@@ -31,7 +31,7 @@ function fixture(t){
   const ctx={niaQQ:qq,niaMemory:memory,niaMood:mood,get(k){return this[k];},sessionPersistence:{stat:async id=>saved.get(id),flush:async()=>{}},
     agents:{create:open,resume:open},workspaceRegistry:{create:async()=>({attachSession:async()=>{}})}};
   async function open(opts){const id=opts.sessionId||opts.resumeSessionId,a={options:{...opts.agentOptions},session:{id,header:{cwd:dir},append(){},requestHeader:()=>({config:{provider:'p',model:'m'}})},
-    ctx:{systemPrompt:{section:x=>{registered.push(x);}},tools:{register:x=>{registered.push(x);}}},whenIdle:async()=>{},followup:async m=>{prompts.push(m);}};
+    ctx:{systemPrompt:{section:x=>{registered.push(x);}},tools:{register:x=>{registered.push(x);},guard:()=>()=>{}}},cancel(){},whenIdle:async()=>{},followup:async m=>{prompts.push(m);}};
     await opts.setup(a.ctx,a);saved.set(id,{});agents.set(id,a);return {agent:a,dispose:async()=>agents.delete(id)};}
   const instance=createActivity(ctx,{home:dir,now:()=>clock,random:()=>0});
   t.after(async()=>{await instance.close();assert.equal(path.dirname(dir),os.tmpdir());fs.rmSync(dir,{recursive:true});});

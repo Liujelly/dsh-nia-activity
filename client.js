@@ -17,6 +17,10 @@ const React=require('react');
   const note = text => h('p',{className:'nia-muted'},text);
   const empty = text => h('div',{className:'nia-empty'},text);
   const fmt = at => at ? new Date(at).toLocaleString() : '未记录';
+  const intentStatus = value => ({idea:'一个想法',planned:'打算去做',waiting:'等待合适机会',done:'已结束',cancelled:'不再考虑'}[value] || value || '未记录');
+  const runStatus = value => ({running:'活动中',complete:'本轮已结束',completed:'本轮已结束',error:'运行失败',failed:'执行失败',uncertain:'结果待核实',budget:'已到本轮预算',stopped:'已停止',success:'工具返回成功',ok:'工具返回成功',pending:'等待结果'}[value] || value || '未记录');
+  const triggerLabel = value => ({manual:'手动唤醒',random:'随机机会',due:'到期的想法',event:'相关事件',scheduled:'到期的想法'}[value] || value || '未记录');
+  const placeKind = value => ({app:'应用',site:'网站',chat:'聊天',file:'文件',game:'游戏'}[value] || value || '入口');
   const details = (title,value) => h('details',null,h('summary',null,title),h('pre',null,JSON.stringify(value,null,2)));
   function Picker({label, value, options, onChange, placeholder='请选择', emptyText='暂无可选项，请刷新后重试', disabled=false}) {
     const [open,setOpen] = React.useState(false), [query,setQuery] = React.useState('');
@@ -40,7 +44,7 @@ const React=require('react');
   const api=(p,b)=>request('/dsh-nia-activity',p,b);
   function Panel(){
     const [data,setData]=React.useState(null),[form,setForm]=React.useState(null),[saved,setSaved]=React.useState(null),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[notice,setNotice]=React.useState('');
-    const toForm=c=>({...c,peakWindows:c.peakWindows.map(w=>w.join('-')).join(', '),peakWeekdays:c.peakWeekdays.join(', ')});
+    const toForm=c=>({eventWakes:true,eventDebounceMinutes:3,maxRunMinutes:10,maxToolCalls:40,...c,peakWindows:c.peakWindows.map(w=>w.join('-')).join(', '),peakWeekdays:c.peakWeekdays.join(', ')});
     const refresh=async(reset=false)=>{const d=await api('state');setData(d);if(reset){const f=toForm(d.config);setForm(f);setSaved(f);}};
     React.useEffect(()=>{let active=true,timer;const poll=async()=>{try{const d=await api('state');if(active){setData(d);setForm(f=>{if(f)return f;const n=toForm(d.config);setSaved(n);return n;});}}catch(e){if(active)setError(e.message);}finally{if(active)timer=setTimeout(poll,3000);}};poll();return()=>{active=false;clearTimeout(timer);};},[]);
     const act=async(fn,msg,reset=false)=>{setBusy(true);setError('');setNotice('');try{await fn();await refresh(reset);setNotice(msg);}catch(e){setError(e.message);}finally{setBusy(false);}};
@@ -48,12 +52,41 @@ const React=require('react');
     const edit=(k,v)=>setForm(f=>({...f,[k]:v}));const dirty=JSON.stringify(form)!==JSON.stringify(saved);
     const number=(key,label,hint)=>field(label,h('input',{type:'number','aria-label':label,value:form[key],disabled:busy,onChange:e=>edit(key,e.target.value)}),hint);
     const toggle=(key,label,hint)=>field(label,h('label',null,h('input',{type:'checkbox','aria-label':label,checked:!!form[key],disabled:busy,onChange:e=>edit(key,e.target.checked)}),'启用'),hint);
-    const save=()=>act(()=>{const x={...form};for(const k of ['minCheckMinutes','maxCheckMinutes','peakChance','offpeakChance','missBonus','bonusCap','cooldownMinutes','dailyLimit','nearMinutes','farMinutes','quietActivityStart','quietActivityEnd','quietQQStart','quietQQEnd']){if(String(x[k]).trim()==='')throw Error('请填写全部数值');x[k]=Number(x[k]);}x.peakWindows=x.peakWindows.trim()?x.peakWindows.split(/[,，]/).map(s=>{const m=s.trim().match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);if(!m)throw Error('峰时时段请按 9-12, 14-18 格式填写');return [+m[1],+m[2]];}):[];x.peakWeekdays=x.peakWeekdays.trim()?x.peakWeekdays.split(/[,，]/).map(s=>{if(!/^\s*[0-6]\s*$/.test(s))throw Error('峰时星期请填写 0 到 6');return Number(s);}):[];return api('config',x);},'设置已保存',true);
-    return root('activity',header('自主活动','0.1.0 · '+data.status,h('button',{disabled:busy,onClick:()=>act(()=>refresh(true),'已刷新',true)},'刷新状态')),
+    const save=()=>act(()=>{const x={...form};for(const k of ['minCheckMinutes','maxCheckMinutes','peakChance','offpeakChance','missBonus','bonusCap','cooldownMinutes','dailyLimit','nearMinutes','farMinutes','quietActivityStart','quietActivityEnd','quietQQStart','quietQQEnd','eventDebounceMinutes','maxRunMinutes','maxToolCalls']){if(String(x[k]).trim()==='')throw Error('请填写全部数值');x[k]=Number(x[k]);}x.peakWindows=x.peakWindows.trim()?x.peakWindows.split(/[,，]/).map(s=>{const m=s.trim().match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);if(!m)throw Error('峰时时段请按 9-12, 14-18 格式填写');return [+m[1],+m[2]];}):[];x.peakWeekdays=x.peakWeekdays.trim()?x.peakWeekdays.split(/[,，]/).map(s=>{if(!/^\s*[0-6]\s*$/.test(s))throw Error('峰时星期请填写 0 到 6');return Number(s);}):[];return api('config',x);},'设置已保存',true);
+    const intents=data.notebook?.intents||[],places=data.notebook?.places||[],lastRun=data.lastRun,capabilities=data.capabilities;
+    const openIntents=intents.filter(x=>!['done','cancelled'].includes(x.status)),closedIntents=intents.filter(x=>['done','cancelled'].includes(x.status));
+    const renderIntent=(x,closed=false)=>h('div',{className:'nia-record',key:x.id},
+      h('div',{className:'nia-row'},h('strong',null,x.title),h('span',{className:'nia-chip'},intentStatus(x.status))),
+      x.reason?h('p',null,x.reason):null,
+      note(x.nextAt?'下次考虑：'+fmt(x.nextAt):x.lastConsideredAt?'最近考虑：'+fmt(x.lastConsideredAt):'尚未安排下次考虑时间'),
+      x.outcome?h('p',null,'进展：'+x.outcome):null,
+      !closed?h('div',{className:'nia-row'},
+        h('button',{disabled:busy,onClick:()=>act(()=>api('intent',{id:x.id,action:'defer',minutes:60}),'已推迟一小时；到时仍由角色决定是否行动')},'一小时后再考虑'),
+        h('button',{disabled:busy,onClick:()=>act(()=>api('intent',{id:x.id,action:'cancel'}),'已取消这项想法的后续提醒')},'不再考虑')):null);
+    return root('activity',header('自主活动','0.2.0 · '+data.status,h('button',{disabled:busy,onClick:()=>act(()=>refresh(!dirty),'已刷新',!dirty)},'刷新状态')),
       message(error,true),message(notice),
       card('活动状态',note('使用独立的角色工作会话。唤醒后可以继续自己的事、联系熟人，或者选择休息。'),note('下次随机检查：'+fmt(data.nextAt)+' · 最近唤醒：'+fmt(data.lastWake)+' · 今日 '+data.count+' 次'),note('自主活动会话：'+data.sessionId),
-        h('div',{className:'nia-row'},h('button',{disabled:busy||dirty,onClick:()=>act(async()=>{const r=await api('run',{action:'test'});if(!['complete','dry-run'].includes(r.result?.kind))throw Error('本次未运行，请查看活动状态和记录');},form.dryRun?'已演练，查看记录':'已执行一次，查看记录')},form.dryRun?'演练一次':'唤醒一次'),data.status==='结果待核实'?h('button',{disabled:busy,onClick:()=>act(()=>api('run',{action:'acknowledge'}),'已停止重放，后续按计划运行')},'已核实，不重放'):null)),
-      card('运行方式',toggle('enabled','启用自主活动','DSH 运行时才会检查。暂停后当前操作正常结束。'),toggle('dryRun','仅演练','随机命中只记录，不调用模型。'),number('dailyLimit','每天自动活动上限','默认 8 次，唤醒即计数；手动唤醒不受此限制。'),number('cooldownMinutes','活动冷却（分钟）','默认 30。'),number('minCheckMinutes','最短检查间隔（分钟）','默认 20；每次重新随机安排。'),number('maxCheckMinutes','最长检查间隔（分钟）','默认 40。')),
+        h('div',{className:'nia-row'},h('button',{disabled:busy||dirty,onClick:()=>act(async()=>{const r=await api('run',{action:'test'});if(!['complete','dry-run','limited'].includes(r.result?.kind))throw Error('本次未正常结束，请查看活动状态和记录');},form.dryRun?'已演练，查看记录':'已执行一次，查看记录')},form.dryRun?'演练一次':'唤醒一次'),data.status==='结果待核实'?h('button',{disabled:busy,onClick:()=>act(()=>api('run',{action:'acknowledge'}),'已停止重放，后续按计划运行')},'已核实，不重放'):null)),
+      card('想做的事',note('角色可以留下想法、等待、改变主意或结束。到期只是重新考虑的机会，不保证执行或发消息；取消提醒不会撤回已经发生的操作。'),
+        ...openIntents.map(x=>renderIntent(x)),!openIntents.length?empty('暂时没有待考虑的想法'):null,
+        closedIntents.length?h('details',null,h('summary',null,'已结束的想法（'+closedIntents.length+'）'),...closedIntents.map(x=>renderIntent(x,true))):null),
+      card('已认识的入口',note('保留探索中发现的应用、网站和聊天入口；位置可能变化，使用时仍需核对。'),
+        ...places.map(x=>h('div',{className:'nia-record',key:x.id},h('div',{className:'nia-row'},h('strong',null,x.label),h('span',{className:'nia-chip'},placeKind(x.kind))),h('p',{style:{overflowWrap:'anywhere'}},x.locator),x.note?note(x.note):null)),
+        !places.length?empty('尚未保存入口'):null),
+      card('最近活动结果',lastRun?h(React.Fragment,null,
+        note(fmt(lastRun.at)+' · '+triggerLabel(lastRun.trigger)+' · '+runStatus(lastRun.status)),
+        note('工具调用：'+(lastRun.calls??0)+' 次；本轮结束不等于所有想法都已完成。'),
+        lastRun.summary?h('p',null,lastRun.summary):null,
+        ...(lastRun.tools||[]).slice(-20).map((x,i)=>h('div',{className:'nia-record',key:i},h('div',{className:'nia-row'},h('span',{style:{overflowWrap:'anywhere'}},x.name),h('span',{className:'nia-chip'},runStatus(x.status))))),
+        (lastRun.tools||[]).length>20?note('显示最近 20 次工具记录。'):null):empty('尚未记录本轮结果')),
+      card('工具状态',capabilities?h(React.Fragment,null,
+        note('清单记录于：'+fmt(capabilities.registeredAt)+' · DSH 已登记 '+(capabilities.registeredToolsCount??0)+' 个工具'),
+        note('其中桌面与浏览器工具：'+(capabilities.desktopTools||[]).length+' 个'),
+        note(capabilities.providerVerified?'已核对发送前最终请求中的工具名称；实际接收与执行仍需另看回执。':'这里显示 DSH 已登记的工具，尚未确认实际发给模型的请求；不能据此认定模型已经能调用。'),
+        capabilities.note?note(capabilities.note):null,
+        (capabilities.desktopTools||[]).length?details('查看桌面与浏览器工具',capabilities.desktopTools):null):empty('首次打开活动会话后读取工具清单')),
+      card('运行方式',toggle('enabled','启用自主活动','DSH 运行时才会检查。暂停后当前操作正常结束。'),toggle('dryRun','仅演练','命中只记录，不调用模型。'),number('dailyLimit','每天自动活动上限','默认 8 次，唤醒即计数；手动唤醒不受此限制。'),number('cooldownMinutes','活动冷却（分钟）','默认 30。'),number('minCheckMinutes','最短检查间隔（分钟）','默认 20；每次重新随机安排。'),number('maxCheckMinutes','最长检查间隔（分钟）','默认 40。')),
+      card('想法延续与活动预算',toggle('eventWakes','允许相关事件与到期想法唤醒','仍遵守暂停、安静时段、活动冷却和每天自动活动上限。'),number('eventDebounceMinutes','事件等待时间（分钟）','默认 3；合并短时间内的变化，避免接连唤醒。'),number('maxRunMinutes','每轮活动时间预算（分钟）','默认 10；到达预算后停止继续发起操作，已经发生的结果保留。'),number('maxToolCalls','每轮工具调用预算','默认 40；避免一次探索无止境地继续。')),
       card('峰谷与随机机会',number('peakChance','峰时基础命中线（%）','默认 20。'),number('offpeakChance','谷时基础命中线（%）','默认 60。'),number('missBonus','未命中加成（百分点）','默认 10；0 关闭。'),number('bonusCap','未命中加成上限','默认 40。'),number('nearMinutes','最近聊天阈值（分钟）','刚聊天时降低唤醒机会。'),number('farMinutes','长时间未聊天阈值（分钟）','较久没聊天时增加唤醒机会，不要求发消息。'),
         field('峰时时段',h('input',{'aria-label':'峰时时段',value:form.peakWindows,onChange:e=>edit('peakWindows',e.target.value)}),'按小时填写，例如 9-12, 14-18；留空表示没有峰时。'),field('峰时星期',h('input',{'aria-label':'峰时星期',value:form.peakWeekdays,onChange:e=>edit('peakWeekdays',e.target.value)}),'1 到 6 表示周一至周六，0 表示周日；例如 1, 2, 3, 4, 5。')),
       card('安静时段',note('按本机时间。起止相同代表不设该安静时段；主动 QQ 限制独立于自主活动。'),number('quietActivityStart','活动安静开始（小时）'),number('quietActivityEnd','活动安静结束（小时）'),number('quietQQStart','主动 QQ 安静开始（小时）'),number('quietQQEnd','主动 QQ 安静结束（小时）')),

@@ -1,0 +1,56 @@
+diff --git a/lib/index.js b/lib/index.js
+index 0548fa7..a024285 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -1953,7 +1953,20 @@ function openaiCodexSubscriptionProvider({ resolveSpeedMode = () => void 0, reso
+ 					} },
+ 					...serviceTier === void 0 ? {} : { service_tier: serviceTier }
+ 				};
+-				return reasoning?.preparePayload(finalPayload, requestModel) ?? finalPayload;
++				const activityPayload = reasoning?.preparePayload(finalPayload, requestModel) ?? finalPayload;
++				// Names-only activity diagnostic at the final provider payload boundary.
++				try {
++					const names = list => Array.isArray(list) ? list.map(t => t?.name ?? t?.function?.name).filter(n => typeof n === 'string' && /^[a-zA-Z0-9_-]{1,120}$/.test(n)) : [];
++					const top = names(activityPayload.tools);
++					const added = (Array.isArray(activityPayload.input) ? activityPayload.input : []).filter(x => ['additional_tools','tool_search_output'].includes(x?.type)).flatMap(x => names(x.tools));
++					if ([...top,...added].includes('nia_activity_group_contact')) {
++						const dir = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'nia-activity');
++						mkdirSync(dir, { recursive: true });
++						// Diagnostics never include prompts, tool arguments, replies, or credentials.
++						writeFileSync(join(dir, 'provider-tools.json'), JSON.stringify({at:Date.now(),model:String(requestModel.id || '').slice(0,160),tools:top,additionalTools:added}), {mode:0o600});
++					}
++				} catch { /* Tool-name diagnostics must not interrupt a request. */ }
++				return activityPayload;
+ 			}
+ 		};
+ 	};
+@@ -2118,6 +2131,19 @@ function openaiCodexSubscriptionProvider({ resolveSpeedMode = () => void 0, reso
+ 			throw: (error) => iterator ? step("throw", error) : Promise.reject(error)
+ 		};
+ 	};
++// Temporary compatibility for QQ sessions with an added group-contact tool.
++function codexQQToolModel(model, context) {
++  const tools = new Map();
++  for (const tool of Array.isArray(context?.tools) ? context.tools : []) if (tool?.name) tools.set(tool.name, tool);
++  for (const message of Array.isArray(context?.messages) ? context.messages : []) {
++    if (message?.role !== 'system') continue;
++    for (const tool of Array.isArray(message.toolsRemoved) ? message.toolsRemoved : []) tools.delete(typeof tool === 'string' ? tool : tool?.name);
++    for (const tool of Array.isArray(message.toolsAdded) ? message.toolsAdded : []) if (tool?.name) tools.set(tool.name, tool);
++  }
++  if (!['nia_qq_group_contact','nia_activity_group_contact','nia_activity_intent'].some(name=>tools.has(name)) || tools.size > 128) return model;
++  return { ...model, compat: { ...model.compat, supportsAdditionalTools: false, supportsToolSearch: false } };
++}
++
+ 	const routed = (method, model, transcript, options) => {
+ 		const context = understandsSystemMessages(runtimeVersions().piAi) ? transcript : hoistLeadingSystem(transcript);
+ 		const route = reviewRoute(model, context);
+@@ -2127,7 +2153,8 @@ function openaiCodexSubscriptionProvider({ resolveSpeedMode = () => void 0, reso
+ 			context,
+ 			options
+ 		};
+-		const create = () => route === void 0 ? networkIterable((prepared) => provider[method](model, context, prepared), withPreferences(model, options), false, source) : networkIterable((prepared) => provider[method](model, context, prepared), withReview(route, options), true, source);
++		const qqCompatibleModel = route === void 0 ? codexQQToolModel(model, context) : model;
++		const create = () => route === void 0 ? networkIterable((prepared) => provider[method](qqCompatibleModel, context, prepared), withPreferences(qqCompatibleModel, options), false, source) : networkIterable((prepared) => provider[method](model, context, prepared), withReview(route, options), true, source);
+ 		return isDshAutoReview(context) ? reviewIterable(create) : create();
+ 	};
+ 	return Object.freeze({
